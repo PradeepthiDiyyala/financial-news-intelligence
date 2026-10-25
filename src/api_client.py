@@ -1,16 +1,37 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 import requests
 from dotenv import load_dotenv
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 BASE_URL = "https://www.alphavantage.co/query"
 MARKETAUX_URL = "https://api.marketaux.com/v1/news/all"
 
 # Load local .env values for development without committing secrets.
 load_dotenv()
+
+
+def _marketaux_session() -> requests.Session:
+    """Create a session with retries for transient TLS/network failures."""
+    retry = Retry(
+        total=3,
+        connect=3,
+        read=3,
+        status=3,
+        backoff_factor=1.0,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset({"GET"}),
+        raise_on_status=False,
+    )
+    session = requests.Session()
+    session.mount("https://", HTTPAdapter(max_retries=retry))
+    session.headers.update({"User-Agent": "financial-news-intelligence/1.0"})
+    return session
 
 
 def _request(params: dict[str, str]) -> dict[str, Any]:
@@ -55,14 +76,16 @@ def get_marketaux_news(
     symbol: str | None = None,
     limit: int = 3,
 ) -> list[dict[str, Any]]:
-    """Fetch up to ``limit`` financial news articles using Marketaux pagination."""
+    """Fetch financial news using Marketaux pagination with retry handling."""
     api_token = os.getenv("MARKETAUX_API_TOKEN")
     if not api_token:
         raise RuntimeError("MARKETAUX_API_TOKEN is not configured.")
 
     target = min(max(limit, 1), 30)
     articles: list[dict[str, Any]] = []
+    seen_ids: set[str] = set()
     page = 1
+    session = _marketaux_session()
 
     while len(articles) < target:
         remaining = target - len(articles)
@@ -76,23 +99,46 @@ def get_marketaux_news(
         if symbol:
             params["symbols"] = symbol.upper()
 
-        response = requests.get(MARKETAUX_URL, params=params, timeout=20)
-        response.raise_for_status()
-        data = response.json()
+        try:
+            response = session.get(MARKETAUX_URL, params=params, timeout=20)
+            response.raise_for_status()
+            data = response.json()
+        except requests.RequestException as exc:
+            # If an intermittent failure happens after some pages succeeded,
+            # return the articles already collected instead of discarding them.
+            if articles:
+                break
+            raise RuntimeError(f"Marketaux request failed: {exc}") from exc
 
         if "error" in data:
+            if articles:
+                break
             raise RuntimeError(str(data["error"]))
 
         batch = data.get("data", [])
         if not batch:
             break
 
-        articles.extend(batch)
+        added = 0
+        for article in batch:
+            article_id = str(article.get("uuid") or article.get("id") or article.get("url"))
+            if article_id not in seen_ids:
+                seen_ids.add(article_id)
+                articles.append(article)
+                added += 1
+
+        if added == 0:
+            break
+
         page += 1
 
-        # Stop if the API returned fewer articles than requested.
+        # Stop when the API has no more results for this query.
         if len(batch) < page_limit:
             break
+
+        # Small pause between paginated requests to avoid bursty traffic.
+        if len(articles) < target:
+            time.sleep(0.25)
 
     return articles[:target]
 
