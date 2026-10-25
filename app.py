@@ -43,7 +43,7 @@ model = load_ml_model()
 with st.sidebar:
     st.header("Market Intelligence")
     ticker = st.text_input("Stock ticker", value="AAPL").strip().upper()
-    news_limit = st.slider("News articles", 1, 3, 3)
+    news_limit = st.slider("News articles", 3, 30, 10)
 
     market_api_ready = bool(os.getenv("ALPHAVANTAGE_API_KEY"))
     news_api_ready = bool(os.getenv("MARKETAUX_API_TOKEN"))
