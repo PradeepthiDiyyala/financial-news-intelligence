@@ -1,21 +1,55 @@
 from __future__ import annotations
 
-import pandas as pd
-from datasets import load_dataset
+from io import BytesIO
+from pathlib import Path
+from zipfile import ZipFile
 
-LABEL_MAP = {0: "negative", 1: "neutral", 2: "positive"}
+import pandas as pd
+import requests
+
+LABEL_MAP = {"negative": 0, "neutral": 1, "positive": 2}
+DATA_DIR = Path("data/raw")
+DATA_FILE = DATA_DIR / "Sentences_AllAgree.txt"
+DATASET_URL = (
+    "https://huggingface.co/datasets/takala/financial_phrasebank/resolve/"
+    "598b6aad98f7c8d67be161b12a4b5f2497e07edd/data/FinancialPhraseBank-v1.0.zip"
+)
+
+
+def _download_dataset() -> None:
+    """Download and extract the original Financial PhraseBank archive."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+
+    response = requests.get(DATASET_URL, timeout=60)
+    response.raise_for_status()
+
+    with ZipFile(BytesIO(response.content)) as archive:
+        target = next(
+            name
+            for name in archive.namelist()
+            if name.endswith("/Sentences_AllAgree.txt")
+        )
+        DATA_FILE.write_bytes(archive.read(target))
 
 
 def load_financial_phrasebank() -> pd.DataFrame:
-    """Load the all-agree Financial PhraseBank configuration."""
-    # The dataset was moved to the `takala` namespace. Using the dataset
-    # repository directly avoids the legacy `financial_phrasebank.py` loading
-    # script that newer versions of `datasets` no longer execute.
-    dataset = load_dataset(
-        "takala/financial_phrasebank",
-        "sentences_allagree",
-    )
-    df = dataset["train"].to_pandas()
-    df = df.rename(columns={"sentence": "text"})
-    df["sentiment"] = df["label"].map(LABEL_MAP)
-    return df[["text", "label", "sentiment"]].dropna().reset_index(drop=True)
+    """Load the 100%-agreement Financial PhraseBank configuration."""
+    if not DATA_FILE.exists():
+        _download_dataset()
+
+    rows = []
+    with DATA_FILE.open("r", encoding="iso-8859-1") as file:
+        for line in file:
+            line = line.strip()
+            if not line:
+                continue
+            text, sentiment = line.rsplit("@", 1)
+            rows.append(
+                {
+                    "text": text,
+                    "sentiment": sentiment,
+                    "label": LABEL_MAP[sentiment],
+                }
+            )
+
+    return pd.DataFrame(rows, columns=["text", "label", "sentiment"])
