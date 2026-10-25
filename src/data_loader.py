@@ -8,10 +8,12 @@ LABEL_MAP = {0: "negative", 1: "neutral", 2: "positive"}
 
 def load_financial_phrasebank() -> pd.DataFrame:
     """Load the all-agree Financial PhraseBank configuration."""
+    # The dataset was moved to the `takala` namespace. Using the dataset
+    # repository directly avoids the legacy `financial_phrasebank.py` loading
+    # script that newer versions of `datasets` no longer execute.
     dataset = load_dataset(
-        "financial_phrasebank",
+        "takala/financial_phrasebank",
         "sentences_allagree",
-        trust_remote_code=False,
     )
     df = dataset["train"].to_pandas()
     df = df.rename(columns={"sentence": "text"})
