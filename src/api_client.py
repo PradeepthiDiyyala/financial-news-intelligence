@@ -7,6 +7,7 @@ import requests
 from dotenv import load_dotenv
 
 BASE_URL = "https://www.alphavantage.co/query"
+MARKETAUX_URL = "https://api.marketaux.com/v1/news/all"
 
 # Load local .env values for development without committing secrets.
 load_dotenv()
@@ -48,6 +49,33 @@ def get_news_sentiment(
 
     data = _request(params)
     return data.get("feed", [])
+
+
+def get_marketaux_news(
+    symbol: str | None = None,
+    limit: int = 3,
+) -> list[dict[str, Any]]:
+    """Fetch financial news from Marketaux for an optional ticker symbol."""
+    api_token = os.getenv("MARKETAUX_API_TOKEN")
+    if not api_token:
+        raise RuntimeError("MARKETAUX_API_TOKEN is not configured.")
+
+    params = {
+        "api_token": api_token,
+        "language": "en",
+        "limit": str(min(max(limit, 1), 3)),
+    }
+    if symbol:
+        params["symbols"] = symbol.upper()
+
+    response = requests.get(MARKETAUX_URL, params=params, timeout=20)
+    response.raise_for_status()
+    data = response.json()
+
+    if "error" in data:
+        raise RuntimeError(str(data["error"]))
+
+    return data.get("data", [])
 
 
 def get_quote(symbol: str) -> dict[str, Any]:
