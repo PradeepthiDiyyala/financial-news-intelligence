@@ -4,8 +4,12 @@ import os
 from typing import Any
 
 import requests
+from dotenv import load_dotenv
 
 BASE_URL = "https://www.alphavantage.co/query"
+
+# Load local .env values for development without committing secrets.
+load_dotenv()
 
 
 def _request(params: dict[str, str]) -> dict[str, Any]:
