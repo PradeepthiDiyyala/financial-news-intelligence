@@ -55,27 +55,46 @@ def get_marketaux_news(
     symbol: str | None = None,
     limit: int = 3,
 ) -> list[dict[str, Any]]:
-    """Fetch financial news from Marketaux for an optional ticker symbol."""
+    """Fetch up to ``limit`` financial news articles using Marketaux pagination."""
     api_token = os.getenv("MARKETAUX_API_TOKEN")
     if not api_token:
         raise RuntimeError("MARKETAUX_API_TOKEN is not configured.")
 
-    params = {
-        "api_token": api_token,
-        "language": "en",
-        "limit": str(min(max(limit, 1), 3)),
-    }
-    if symbol:
-        params["symbols"] = symbol.upper()
+    target = min(max(limit, 1), 30)
+    articles: list[dict[str, Any]] = []
+    page = 1
 
-    response = requests.get(MARKETAUX_URL, params=params, timeout=20)
-    response.raise_for_status()
-    data = response.json()
+    while len(articles) < target:
+        remaining = target - len(articles)
+        page_limit = min(remaining, 3)
+        params = {
+            "api_token": api_token,
+            "language": "en",
+            "limit": str(page_limit),
+            "page": str(page),
+        }
+        if symbol:
+            params["symbols"] = symbol.upper()
 
-    if "error" in data:
-        raise RuntimeError(str(data["error"]))
+        response = requests.get(MARKETAUX_URL, params=params, timeout=20)
+        response.raise_for_status()
+        data = response.json()
 
-    return data.get("data", [])
+        if "error" in data:
+            raise RuntimeError(str(data["error"]))
+
+        batch = data.get("data", [])
+        if not batch:
+            break
+
+        articles.extend(batch)
+        page += 1
+
+        # Stop if the API returned fewer articles than requested.
+        if len(batch) < page_limit:
+            break
+
+    return articles[:target]
 
 
 def get_quote(symbol: str) -> dict[str, Any]:
